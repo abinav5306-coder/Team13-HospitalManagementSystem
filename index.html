@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Patient Portal</title>
+    <link rel="stylesheet" href="style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <!-- Animated background elements -->
+    <div class="background-elements">
+        <div class="blob blob-1"></div>
+        <div class="blob blob-2"></div>
+    </div>
+    
+    <div class="container" id="app-container">
+        
+        <!-- Login Section -->
+        <div class="form-container" id="login-section">
+            <div class="header">
+                <h2>Welcome Back</h2>
+                <p>Log in to your patient portal</p>
+            </div>
+            
+            <div class="login-tabs">
+                <button class="tab-btn active" data-target="login-up">Username</button>
+                <button class="tab-btn" data-target="login-phone">Mobile</button>
+                <button class="tab-btn" data-target="login-email">Email</button>
+            </div>
+
+            <!-- Login via Username & Password -->
+            <div class="tab-content active" id="login-up">
+                <form id="login-form-up" class="form">
+                    <div class="input-group">
+                        <label for="login-username">Username</label>
+                        <input type="text" id="login-username" required placeholder="Enter username">
+                    </div>
+                    <div class="input-group">
+                        <label for="login-password">Password</label>
+                        <input type="password" id="login-password" required placeholder="Enter password">
+                    </div>
+                    <button type="submit" class="btn primary-btn">Login</button>
+                </form>
+            </div>
+
+            <!-- Login via Mobile Number & OTP -->
+            <div class="tab-content" id="login-phone">
+                <form id="login-form-phone" class="form">
+                    <div class="input-group" id="phone-input-group">
+                        <label for="login-phone-number">Mobile Number</label>
+                        <input type="tel" id="login-phone-number" required pattern="[0-9]{10}" title="Must be exactly 10 digits" placeholder="Enter 10-digit mobile number">
+                    </div>
+                    
+                    <div id="phone-otp-container" class="hidden">
+                        <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 0.5rem; text-align: left;">
+                            OTP sent to <strong id="display-phone-num"></strong> 
+                            <a href="#" id="change-phone-num" style="color: var(--primary-color); text-decoration: none; margin-left: 5px;">(Change)</a>
+                        </p>
+                        <div class="input-group" id="phone-otp-group" style="margin-bottom: 0.5rem;">
+                            <label for="login-phone-otp">Enter OTP</label>
+                            <input type="text" id="login-phone-otp" placeholder="Enter 6-digit OTP" pattern="[0-9]{6}" title="Must be 6 digits">
+                        </div>
+                        <div style="text-align: right; margin-bottom: 1.5rem;">
+                            <a href="#" id="btn-resend-phone-otp" style="font-size: 0.85rem; color: var(--text-muted); pointer-events: none; text-decoration: none;">Resend OTP (30s)</a>
+                        </div>
+                    </div>
+
+                    <button type="button" class="btn primary-btn" id="btn-send-phone-otp">Send OTP</button>
+                    <button type="submit" class="btn primary-btn hidden" id="btn-verify-phone-otp">Verify OTP</button>
+                </form>
+            </div>
+
+            <!-- Login via Email & OTP -->
+            <div class="tab-content" id="login-email">
+                <form id="login-form-email" class="form">
+                    <div class="input-group" id="email-input-group">
+                        <label for="login-email-id">Email Address</label>
+                        <input type="email" id="login-email-id" required pattern=".+@gmail\.com" title="Must be a @gmail.com address" placeholder="Enter email address">
+                    </div>
+                    
+                    <div id="email-otp-container" class="hidden">
+                        <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 0.5rem; text-align: left;">
+                            Code sent to <strong id="display-email-id"></strong> 
+                            <a href="#" id="change-email-id" style="color: var(--primary-color); text-decoration: none; margin-left: 5px;">(Change)</a>
+                        </p>
+                        <div class="input-group" id="email-otp-group" style="margin-bottom: 0.5rem;">
+                            <label for="login-email-otp">Enter Verification Code</label>
+                            <input type="text" id="login-email-otp" placeholder="Enter 6-digit code" pattern="[0-9]{6}" title="Must be 6 digits">
+                        </div>
+                        <div style="text-align: right; margin-bottom: 1.5rem;">
+                            <a href="#" id="btn-resend-email-otp" style="font-size: 0.85rem; color: var(--text-muted); pointer-events: none; text-decoration: none;">Resend Code (30s)</a>
+                        </div>
+                    </div>
+
+                    <button type="button" class="btn primary-btn" id="btn-send-email-otp">Send Code</button>
+                    <button type="submit" class="btn primary-btn hidden" id="btn-verify-email-otp">Verify Code</button>
+                </form>
+            </div>
+
+            <div class="switch-form">
+                <p>Don't have an account? <a href="#" id="go-to-register">Register here</a></p>
+            </div>
+            
+            <div id="login-msg" class="msg"></div>
+        </div>
+
+        <!-- Registration Section -->
+        <div class="form-container hidden" id="register-section">
+            <div class="header">
+                <h2>Patient Registration</h2>
+                <p>Create a new account</p>
+            </div>
+            
+            <form id="register-form" class="form grid-form">
+                <div class="input-group">
+                    <label for="reg-fullname">Full Name</label>
+                    <input type="text" id="reg-fullname" required placeholder="John Doe">
+                </div>
+                <div class="input-group">
+                    <label for="reg-email">Email Address</label>
+                    <input type="email" id="reg-email" required pattern=".+@gmail\.com" title="Must be a @gmail.com address" placeholder="john@gmail.com">
+                </div>
+                <div class="input-group">
+                    <label for="reg-mobile">Mobile Number</label>
+                    <input type="tel" id="reg-mobile" required pattern="[0-9]{10}" title="Must be exactly 10 digits" placeholder="1234567890">
+                </div>
+                <div class="input-group">
+                    <label for="reg-dob">Date of Birth</label>
+                    <input type="date" id="reg-dob">
+                </div>
+                <div class="input-group">
+                    <label for="reg-gender">Gender</label>
+                    <select id="reg-gender" required>
+                        <option value="" disabled selected>Select Gender</option>
+                        <option value="male">Male</option>
+                        <option value="female">Female</option>
+                        <option value="other">Other</option>
+                    </select>
+                </div>
+                <div class="input-group">
+                    <label for="reg-username">Username</label>
+                    <input type="text" id="reg-username" required pattern="^(?=.*[0-9].*[0-9]).+$" title="Must contain at least 2 numbers" placeholder="johndoe123">
+                </div>
+                <div class="input-group">
+                    <label for="reg-password">Password</label>
+                    <input type="password" id="reg-password" required pattern="^(?=.*[A-Z])(?=.*[0-9].*[0-9])(?=.*[!@#\$%\^&\*\(\)_\+\-\=\[\]\{\};':&quot;\\\|,\.<>\/\?]).+$" title="Must have 1 uppercase, 2 numbers, and 1 special character" placeholder="Strong password">
+                </div>
+                <div class="input-group">
+                    <label for="reg-confirm-password">Confirm Password</label>
+                    <input type="password" id="reg-confirm-password" required placeholder="Confirm password">
+                </div>
+                
+                <div class="form-actions">
+                    <button type="submit" class="btn primary-btn">Register</button>
+                </div>
+            </form>
+            
+            <div class="switch-form">
+                <p>Already have an account? <a href="#" id="go-to-login">Log in</a></p>
+            </div>
+
+            <div id="reg-msg" class="msg"></div>
+        </div>
+        
+    </div>
+
+    <!-- Success Modal -->
+    <div class="modal hidden" id="success-modal">
+        <div class="modal-content">
+            <div class="success-icon">✓</div>
+            <h2>Login Successful!</h2>
+            <p>Welcome to the Patient Management System.</p>
+            <button class="btn primary-btn" id="btn-logout">Logout</button>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
