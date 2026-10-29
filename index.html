@@ -218,14 +218,17 @@
         <div class="form-container hidden" id="admin-dashboard-section" style="max-width: 1200px;">
             <div class="header">
                 <h2>Admin Dashboard</h2>
-                <p>Manage Patients and Medications</p>
+                <p>Manage Patients, Medications, Doctors &amp; Appointments</p>
             </div>
 
-            <div class="login-tabs">
-                <button class="tab-btn active" id="tab-admin-register-btn">Register Patient</button>
-                <button class="tab-btn" id="tab-admin-meds-btn">Assign Medication</button>
+            <div class="login-tabs" style="flex-wrap: wrap;">
+                <button class="tab-btn active" id="tab-admin-register-btn">Patients</button>
+                <button class="tab-btn" id="tab-admin-meds-btn">Medications</button>
+                <button class="tab-btn" id="tab-admin-doctors-btn">Doctors</button>
+                <button class="tab-btn" id="tab-admin-appointments-btn">Appointments</button>
             </div>
 
+            <!-- ---- Patients Tab ---- -->
             <div class="tab-content active" id="admin-register-tab">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
                     <h3>Patient Management</h3>
@@ -253,6 +256,7 @@
                 </div>
             </div>
 
+            <!-- ---- Medications Tab ---- -->
             <div class="tab-content" id="admin-meds-tab">
                 <form id="admin-meds-form" class="form">
                     <div class="input-group">
@@ -276,6 +280,60 @@
                     <button type="submit" class="btn primary-btn">Assign Medication</button>
                 </form>
                 <div id="admin-meds-msg" class="msg"></div>
+            </div>
+
+            <!-- ---- Doctors Tab ---- -->
+            <div class="tab-content" id="admin-doctors-tab">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                    <h3>Doctor Management</h3>
+                    <button id="admin-add-doctor-btn" class="btn primary-btn" style="width: auto; padding: 8px 16px;">+ Add Doctor</button>
+                </div>
+                <div id="doctors-loading" style="text-align:center; padding: 20px; color: var(--text-muted);">Loading doctors...</div>
+                <div id="doctors-empty" class="hidden" style="text-align:center; padding: 20px; color: var(--text-muted);">No doctors found. Add one to get started.</div>
+                <div style="overflow-x: auto;">
+                    <table id="admin-doctors-table" class="hidden" style="width: 100%; border-collapse: collapse; text-align: left; font-size: 0.9rem;">
+                        <thead>
+                            <tr style="border-bottom: 2px solid #ddd;">
+                                <th style="padding: 10px;">Full Name</th>
+                                <th style="padding: 10px;">Email</th>
+                                <th style="padding: 10px;">Mobile</th>
+                                <th style="padding: 10px;">Specialization</th>
+                                <th style="padding: 10px;">Availability</th>
+                                <th style="padding: 10px;">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="admin-doctors-tbody"></tbody>
+                    </table>
+                </div>
+                <div id="admin-doctors-msg" class="msg"></div>
+            </div>
+
+            <!-- ---- Appointments Tab ---- -->
+            <div class="tab-content" id="admin-appointments-tab">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                    <h3>Appointment Management</h3>
+                    <button id="admin-add-appointment-btn" class="btn primary-btn" style="width: auto; padding: 8px 16px;">+ New Appointment</button>
+                </div>
+                <div id="appointments-loading" style="text-align:center; padding: 20px; color: var(--text-muted);">Loading appointments...</div>
+                <div id="appointments-empty" class="hidden" style="text-align:center; padding: 20px; color: var(--text-muted);">No appointments found. Create one to get started.</div>
+                <div style="overflow-x: auto;">
+                    <table id="admin-appointments-table" class="hidden" style="width: 100%; border-collapse: collapse; text-align: left; font-size: 0.9rem;">
+                        <thead>
+                            <tr style="border-bottom: 2px solid #ddd;">
+                                <th style="padding: 10px;">Patient</th>
+                                <th style="padding: 10px;">Doctor</th>
+                                <th style="padding: 10px;">Specialization</th>
+                                <th style="padding: 10px;">Date</th>
+                                <th style="padding: 10px;">Time</th>
+                                <th style="padding: 10px;">Reason</th>
+                                <th style="padding: 10px;">Status</th>
+                                <th style="padding: 10px;">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="admin-appointments-tbody"></tbody>
+                    </table>
+                </div>
+                <div id="admin-appointments-msg" class="msg"></div>
             </div>
 
             <div style="margin-top: 20px; text-align: center;">
@@ -336,6 +394,95 @@
                 </div>
             </form>
             <div id="admin-reg-msg" class="msg"></div>
+        </div>
+    </div>
+
+    <!-- Doctor Modal -->
+    <div class="modal hidden" id="admin-doctor-modal">
+        <div class="modal-content" style="max-width: 700px; width: 90%; text-align: left; max-height: 90vh; overflow-y: auto;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                <h2 id="admin-doctor-modal-title">Add Doctor</h2>
+                <button id="admin-close-doctor-modal" style="background: none; border: none; font-size: 1.5rem; cursor: pointer;">&times;</button>
+            </div>
+            <form id="admin-doctor-form" class="form grid-form">
+                <input type="hidden" id="admin-doctor-id">
+                <div class="input-group">
+                    <label for="doctor-full-name">Full Name</label>
+                    <input type="text" id="doctor-full-name" required placeholder="Dr. Jane Smith">
+                </div>
+                <div class="input-group">
+                    <label for="doctor-email">Email</label>
+                    <input type="email" id="doctor-email" required placeholder="jane@hospital.com">
+                </div>
+                <div class="input-group">
+                    <label for="doctor-mobile">Mobile Number</label>
+                    <input type="tel" id="doctor-mobile" required pattern="[0-9]{10}" title="Must be exactly 10 digits" placeholder="9876543210">
+                </div>
+                <div class="input-group">
+                    <label for="doctor-specialization">Specialization</label>
+                    <input type="text" id="doctor-specialization" required placeholder="Cardiology">
+                </div>
+                <div class="input-group">
+                    <label for="doctor-availability">Availability</label>
+                    <select id="doctor-availability" required>
+                        <option value="available">Available</option>
+                        <option value="unavailable">Unavailable</option>
+                    </select>
+                </div>
+                <div class="form-actions" style="grid-column: 1 / -1; margin-top: 15px;">
+                    <button type="submit" class="btn primary-btn" id="admin-doctor-submit-btn">Add Doctor</button>
+                </div>
+            </form>
+            <div id="admin-doctor-form-msg" class="msg"></div>
+        </div>
+    </div>
+
+    <!-- Appointment Modal -->
+    <div class="modal hidden" id="admin-appointment-modal">
+        <div class="modal-content" style="max-width: 800px; width: 90%; text-align: left; max-height: 90vh; overflow-y: auto;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                <h2 id="admin-appointment-modal-title">New Appointment</h2>
+                <button id="admin-close-appointment-modal" style="background: none; border: none; font-size: 1.5rem; cursor: pointer;">&times;</button>
+            </div>
+            <form id="admin-appointment-form" class="form grid-form">
+                <input type="hidden" id="admin-appointment-id">
+                <div class="input-group">
+                    <label for="appt-patient">Patient</label>
+                    <select id="appt-patient" required>
+                        <option value="" disabled selected>Select Patient</option>
+                    </select>
+                </div>
+                <div class="input-group">
+                    <label for="appt-doctor">Doctor</label>
+                    <select id="appt-doctor" required>
+                        <option value="" disabled selected>Select Doctor</option>
+                    </select>
+                </div>
+                <div class="input-group">
+                    <label for="appt-date">Appointment Date</label>
+                    <input type="date" id="appt-date" required>
+                </div>
+                <div class="input-group">
+                    <label for="appt-time">Appointment Time</label>
+                    <input type="time" id="appt-time" required>
+                </div>
+                <div class="input-group" style="grid-column: 1 / -1;">
+                    <label for="appt-reason">Reason for Visit</label>
+                    <input type="text" id="appt-reason" placeholder="e.g. Routine checkup, fever, etc.">
+                </div>
+                <div class="input-group">
+                    <label for="appt-status">Status</label>
+                    <select id="appt-status" required>
+                        <option value="scheduled">Scheduled</option>
+                        <option value="completed">Completed</option>
+                        <option value="cancelled">Cancelled</option>
+                    </select>
+                </div>
+                <div class="form-actions" style="grid-column: 1 / -1; margin-top: 15px;">
+                    <button type="submit" class="btn primary-btn" id="admin-appointment-submit-btn">Create Appointment</button>
+                </div>
+            </form>
+            <div id="admin-appointment-form-msg" class="msg"></div>
         </div>
     </div>
 

@@ -635,25 +635,42 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    // Admin Dashboard Tabs
+    // Admin Dashboard Tabs (extended for DD-14)
     const tabAdminRegisterBtn = document.getElementById('tab-admin-register-btn');
     const tabAdminMedsBtn = document.getElementById('tab-admin-meds-btn');
+    const tabAdminDoctorsBtn = document.getElementById('tab-admin-doctors-btn');
+    const tabAdminAppointmentsBtn = document.getElementById('tab-admin-appointments-btn');
     const adminRegisterTab = document.getElementById('admin-register-tab');
     const adminMedsTab = document.getElementById('admin-meds-tab');
-    
+    const adminDoctorsTab = document.getElementById('admin-doctors-tab');
+    const adminAppointmentsTab = document.getElementById('admin-appointments-tab');
+
+    function switchAdminTab(activeBtn, activeTab) {
+        [tabAdminRegisterBtn, tabAdminMedsBtn, tabAdminDoctorsBtn, tabAdminAppointmentsBtn]
+            .forEach(b => b && b.classList.remove('active'));
+        [adminRegisterTab, adminMedsTab, adminDoctorsTab, adminAppointmentsTab]
+            .forEach(t => t && t.classList.remove('active'));
+        activeBtn.classList.add('active');
+        activeTab.classList.add('active');
+    }
+
     tabAdminRegisterBtn.addEventListener('click', () => {
-        tabAdminRegisterBtn.classList.add('active');
-        tabAdminMedsBtn.classList.remove('active');
-        adminRegisterTab.classList.add('active');
-        adminMedsTab.classList.remove('active');
+        switchAdminTab(tabAdminRegisterBtn, adminRegisterTab);
     });
 
     tabAdminMedsBtn.addEventListener('click', () => {
-        tabAdminMedsBtn.classList.add('active');
-        tabAdminRegisterBtn.classList.remove('active');
-        adminMedsTab.classList.add('active');
-        adminRegisterTab.classList.remove('active');
+        switchAdminTab(tabAdminMedsBtn, adminMedsTab);
         loadPatientsForAdmin();
+    });
+
+    tabAdminDoctorsBtn.addEventListener('click', () => {
+        switchAdminTab(tabAdminDoctorsBtn, adminDoctorsTab);
+        loadDoctorsTable();
+    });
+
+    tabAdminAppointmentsBtn.addEventListener('click', () => {
+        switchAdminTab(tabAdminAppointmentsBtn, adminAppointmentsTab);
+        loadAppointmentsTable();
     });
 
     document.getElementById('admin-logout-btn').addEventListener('click', async () => {
@@ -905,6 +922,361 @@ document.addEventListener('DOMContentLoaded', () => {
             showMsg(adminMedsMsg, 'Error assigning medication', true);
         }
     });
+
+    // ============================================================
+    // DD-14: DOCTOR MANAGEMENT JS
+    // ============================================================
+
+    const adminDoctorModal = document.getElementById('admin-doctor-modal');
+    const adminDoctorForm = document.getElementById('admin-doctor-form');
+    const adminDoctorFormMsg = document.getElementById('admin-doctor-form-msg');
+    const adminDoctorModalTitle = document.getElementById('admin-doctor-modal-title');
+    const adminDoctorSubmitBtn = document.getElementById('admin-doctor-submit-btn');
+    const adminDoctorsTbody = document.getElementById('admin-doctors-tbody');
+    const adminDoctorsMsg = document.getElementById('admin-doctors-msg');
+
+    function getAdminToken() {
+        return localStorage.getItem('adminToken');
+    }
+
+    async function loadDoctorsTable() {
+        const loading = document.getElementById('doctors-loading');
+        const empty = document.getElementById('doctors-empty');
+        const table = document.getElementById('admin-doctors-table');
+        loading.classList.remove('hidden');
+        empty.classList.add('hidden');
+        table.classList.add('hidden');
+        adminDoctorsTbody.innerHTML = '';
+
+        try {
+            const res = await fetch('http://localhost:3000/api/admin/doctors', {
+                headers: { 'Authorization': `Bearer ${getAdminToken()}` }
+            });
+            const doctors = await res.json();
+            loading.classList.add('hidden');
+
+            if (!Array.isArray(doctors) || doctors.length === 0) {
+                empty.classList.remove('hidden');
+                return;
+            }
+            table.classList.remove('hidden');
+
+            doctors.forEach(doc => {
+                const avail = doc.availability === 'available'
+                    ? '<span style="color:#10b981; font-weight:600;">Available</span>'
+                    : '<span style="color:#ef4444; font-weight:600;">Unavailable</span>';
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td style="padding:10px; border-bottom:1px solid #eee;">${doc.full_name}</td>
+                    <td style="padding:10px; border-bottom:1px solid #eee;">${doc.email}</td>
+                    <td style="padding:10px; border-bottom:1px solid #eee;">${doc.mobile}</td>
+                    <td style="padding:10px; border-bottom:1px solid #eee;">${doc.specialization}</td>
+                    <td style="padding:10px; border-bottom:1px solid #eee;">${avail}</td>
+                    <td style="padding:10px; border-bottom:1px solid #eee; white-space:nowrap;">
+                        <button class="btn primary-btn btn-edit-doctor" data-id="${doc.id}" style="padding:5px 10px; font-size:0.8rem; margin-right:5px;">Edit</button>
+                        <button class="btn btn-delete-doctor" data-id="${doc.id}" style="padding:5px 10px; font-size:0.8rem; background:#e74c3c; color:white;">Remove</button>
+                    </td>
+                `;
+                adminDoctorsTbody.appendChild(tr);
+            });
+
+            document.querySelectorAll('.btn-edit-doctor').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const id = btn.getAttribute('data-id');
+                    const doc = doctors.find(d => d.id === id);
+                    if (doc) openDoctorModal(doc);
+                });
+            });
+
+            document.querySelectorAll('.btn-delete-doctor').forEach(btn => {
+                btn.addEventListener('click', async () => {
+                    const id = btn.getAttribute('data-id');
+                    if (!confirm('Are you sure you want to remove this doctor?')) return;
+                    try {
+                        const res = await fetch(`http://localhost:3000/api/admin/doctors/${id}`, {
+                            method: 'DELETE',
+                            headers: { 'Authorization': `Bearer ${getAdminToken()}` }
+                        });
+                        const data = await res.json();
+                        if (data.success) {
+                            showMsg(adminDoctorsMsg, 'Doctor removed successfully.', false);
+                            loadDoctorsTable();
+                        } else {
+                            showMsg(adminDoctorsMsg, data.error || 'Error removing doctor.', true);
+                        }
+                    } catch (e) {
+                        showMsg(adminDoctorsMsg, 'Error connecting to server.', true);
+                    }
+                });
+            });
+        } catch (e) {
+            loading.classList.add('hidden');
+            adminDoctorsTbody.innerHTML = '<tr><td colspan="6" style="text-align:center;">Error loading doctors</td></tr>';
+            table.classList.remove('hidden');
+        }
+    }
+
+    function openDoctorModal(doc = null) {
+        adminDoctorForm.reset();
+        adminDoctorFormMsg.textContent = '';
+        if (doc) {
+            document.getElementById('admin-doctor-id').value = doc.id;
+            document.getElementById('doctor-full-name').value = doc.full_name || '';
+            document.getElementById('doctor-email').value = doc.email || '';
+            document.getElementById('doctor-mobile').value = doc.mobile || '';
+            document.getElementById('doctor-specialization').value = doc.specialization || '';
+            document.getElementById('doctor-availability').value = doc.availability || 'available';
+            adminDoctorModalTitle.textContent = 'Edit Doctor';
+            adminDoctorSubmitBtn.textContent = 'Save Changes';
+        } else {
+            document.getElementById('admin-doctor-id').value = '';
+            adminDoctorModalTitle.textContent = 'Add Doctor';
+            adminDoctorSubmitBtn.textContent = 'Add Doctor';
+        }
+        adminDoctorModal.classList.remove('hidden');
+    }
+
+    document.getElementById('admin-add-doctor-btn').addEventListener('click', () => openDoctorModal());
+    document.getElementById('admin-close-doctor-modal').addEventListener('click', () => adminDoctorModal.classList.add('hidden'));
+
+    adminDoctorForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const id = document.getElementById('admin-doctor-id').value;
+        const payload = {
+            full_name: document.getElementById('doctor-full-name').value.trim(),
+            email: document.getElementById('doctor-email').value.trim(),
+            mobile: document.getElementById('doctor-mobile').value.trim(),
+            specialization: document.getElementById('doctor-specialization').value.trim(),
+            availability: document.getElementById('doctor-availability').value
+        };
+        try {
+            const url = id ? `http://localhost:3000/api/admin/doctors/${id}` : 'http://localhost:3000/api/admin/doctors';
+            const method = id ? 'PUT' : 'POST';
+            const res = await fetch(url, {
+                method,
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${getAdminToken()}` },
+                body: JSON.stringify(payload)
+            });
+            const data = await res.json();
+            if (data.success) {
+                showMsg(adminDoctorFormMsg, id ? 'Doctor updated successfully!' : 'Doctor added successfully!', false);
+                setTimeout(() => {
+                    adminDoctorModal.classList.add('hidden');
+                    loadDoctorsTable();
+                }, 1000);
+            } else {
+                showMsg(adminDoctorFormMsg, data.error || 'Error saving doctor.', true);
+            }
+        } catch (err) {
+            showMsg(adminDoctorFormMsg, 'Error connecting to server.', true);
+        }
+    });
+
+    // ============================================================
+    // DD-14: APPOINTMENT MANAGEMENT JS
+    // ============================================================
+
+    const adminAppointmentModal = document.getElementById('admin-appointment-modal');
+    const adminAppointmentForm = document.getElementById('admin-appointment-form');
+    const adminAppointmentFormMsg = document.getElementById('admin-appointment-form-msg');
+    const adminAppointmentModalTitle = document.getElementById('admin-appointment-modal-title');
+    const adminAppointmentSubmitBtn = document.getElementById('admin-appointment-submit-btn');
+    const adminAppointmentsTbody = document.getElementById('admin-appointments-tbody');
+    const adminAppointmentsMsg = document.getElementById('admin-appointments-msg');
+
+    function statusBadge(status) {
+        const map = {
+            scheduled: { color: '#6366f1', bg: 'rgba(99,102,241,0.1)' },
+            completed:  { color: '#10b981', bg: 'rgba(16,185,129,0.1)' },
+            cancelled:  { color: '#ef4444', bg: 'rgba(239,68,68,0.1)' }
+        };
+        const s = map[status] || { color: '#6b7280', bg: '#f3f4f6' };
+        return `<span style="background:${s.bg}; color:${s.color}; padding:3px 10px; border-radius:12px; font-size:0.8rem; font-weight:600; text-transform:capitalize;">${status}</span>`;
+    }
+
+    async function populateAppointmentDropdowns() {
+        // Patients dropdown
+        const patSelect = document.getElementById('appt-patient');
+        patSelect.innerHTML = '<option value="" disabled selected>Loading...</option>';
+        try {
+            const res = await fetch('http://localhost:3000/api/admin/users', {
+                headers: { 'Authorization': `Bearer ${getAdminToken()}` }
+            });
+            const users = await res.json();
+            patSelect.innerHTML = '<option value="" disabled selected>Select Patient</option>';
+            users.forEach(u => {
+                const opt = document.createElement('option');
+                opt.value = u.id;
+                opt.textContent = `${u.fullname || u.username} (${u.username})`;
+                patSelect.appendChild(opt);
+            });
+        } catch (e) {
+            patSelect.innerHTML = '<option value="" disabled>Error loading patients</option>';
+        }
+
+        // Doctors dropdown
+        const docSelect = document.getElementById('appt-doctor');
+        docSelect.innerHTML = '<option value="" disabled selected>Loading...</option>';
+        try {
+            const res = await fetch('http://localhost:3000/api/admin/doctors', {
+                headers: { 'Authorization': `Bearer ${getAdminToken()}` }
+            });
+            const doctors = await res.json();
+            docSelect.innerHTML = '<option value="" disabled selected>Select Doctor</option>';
+            doctors.forEach(d => {
+                const opt = document.createElement('option');
+                opt.value = d.id;
+                opt.textContent = `${d.full_name} (${d.specialization})`;
+                opt.disabled = d.availability !== 'available';
+                docSelect.appendChild(opt);
+            });
+        } catch (e) {
+            docSelect.innerHTML = '<option value="" disabled>Error loading doctors</option>';
+        }
+    }
+
+    async function loadAppointmentsTable() {
+        const loading = document.getElementById('appointments-loading');
+        const empty = document.getElementById('appointments-empty');
+        const table = document.getElementById('admin-appointments-table');
+        loading.classList.remove('hidden');
+        empty.classList.add('hidden');
+        table.classList.add('hidden');
+        adminAppointmentsTbody.innerHTML = '';
+
+        try {
+            const res = await fetch('http://localhost:3000/api/admin/appointments', {
+                headers: { 'Authorization': `Bearer ${getAdminToken()}` }
+            });
+            const appointments = await res.json();
+            loading.classList.add('hidden');
+
+            if (!Array.isArray(appointments) || appointments.length === 0) {
+                empty.classList.remove('hidden');
+                return;
+            }
+            table.classList.remove('hidden');
+
+            appointments.forEach(appt => {
+                const patientName = appt.patients ? (appt.patients.fullname || appt.patients.username || 'Unknown') : 'Unknown';
+                const doctorName = appt.doctors ? appt.doctors.full_name : 'Unknown';
+                const spec = appt.doctors ? appt.doctors.specialization : '-';
+
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td style="padding:10px; border-bottom:1px solid #eee;">${patientName}</td>
+                    <td style="padding:10px; border-bottom:1px solid #eee;">${doctorName}</td>
+                    <td style="padding:10px; border-bottom:1px solid #eee;">${spec}</td>
+                    <td style="padding:10px; border-bottom:1px solid #eee;">${appt.appointment_date}</td>
+                    <td style="padding:10px; border-bottom:1px solid #eee;">${appt.appointment_time}</td>
+                    <td style="padding:10px; border-bottom:1px solid #eee;">${appt.reason || '-'}</td>
+                    <td style="padding:10px; border-bottom:1px solid #eee;">${statusBadge(appt.status)}</td>
+                    <td style="padding:10px; border-bottom:1px solid #eee; white-space:nowrap;">
+                        <button class="btn primary-btn btn-edit-appt" data-id="${appt.id}" style="padding:5px 10px; font-size:0.8rem; margin-right:5px;">Edit</button>
+                        ${appt.status !== 'cancelled' ? `<button class="btn btn-cancel-appt" data-id="${appt.id}" style="padding:5px 10px; font-size:0.8rem; background:#e74c3c; color:white;">Cancel</button>` : ''}
+                    </td>
+                `;
+                adminAppointmentsTbody.appendChild(tr);
+            });
+
+            document.querySelectorAll('.btn-edit-appt').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const id = btn.getAttribute('data-id');
+                    const appt = appointments.find(a => a.id === id);
+                    if (appt) openAppointmentModal(appt);
+                });
+            });
+
+            document.querySelectorAll('.btn-cancel-appt').forEach(btn => {
+                btn.addEventListener('click', async () => {
+                    const id = btn.getAttribute('data-id');
+                    if (!confirm('Cancel this appointment?')) return;
+                    try {
+                        const res = await fetch(`http://localhost:3000/api/admin/appointments/${id}`, {
+                            method: 'DELETE',
+                            headers: { 'Authorization': `Bearer ${getAdminToken()}` }
+                        });
+                        const data = await res.json();
+                        if (data.success) {
+                            showMsg(adminAppointmentsMsg, 'Appointment cancelled.', false);
+                            loadAppointmentsTable();
+                        } else {
+                            showMsg(adminAppointmentsMsg, data.error || 'Error cancelling appointment.', true);
+                        }
+                    } catch (e) {
+                        showMsg(adminAppointmentsMsg, 'Error connecting to server.', true);
+                    }
+                });
+            });
+        } catch (e) {
+            loading.classList.add('hidden');
+            adminAppointmentsTbody.innerHTML = '<tr><td colspan="8" style="text-align:center;">Error loading appointments</td></tr>';
+            table.classList.remove('hidden');
+        }
+    }
+
+    async function openAppointmentModal(appt = null) {
+        await populateAppointmentDropdowns();
+        adminAppointmentForm.reset();
+        adminAppointmentFormMsg.textContent = '';
+        if (appt) {
+            document.getElementById('admin-appointment-id').value = appt.id;
+            document.getElementById('appt-patient').value = appt.patient_id;
+            document.getElementById('appt-doctor').value = appt.doctor_id;
+            document.getElementById('appt-date').value = appt.appointment_date;
+            document.getElementById('appt-time').value = appt.appointment_time;
+            document.getElementById('appt-reason').value = appt.reason || '';
+            document.getElementById('appt-status').value = appt.status || 'scheduled';
+            adminAppointmentModalTitle.textContent = 'Edit Appointment';
+            adminAppointmentSubmitBtn.textContent = 'Save Changes';
+        } else {
+            document.getElementById('admin-appointment-id').value = '';
+            // Default date to today
+            const today = new Date().toISOString().split('T')[0];
+            document.getElementById('appt-date').value = today;
+            adminAppointmentModalTitle.textContent = 'New Appointment';
+            adminAppointmentSubmitBtn.textContent = 'Create Appointment';
+        }
+        adminAppointmentModal.classList.remove('hidden');
+    }
+
+    document.getElementById('admin-add-appointment-btn').addEventListener('click', () => openAppointmentModal());
+    document.getElementById('admin-close-appointment-modal').addEventListener('click', () => adminAppointmentModal.classList.add('hidden'));
+
+    adminAppointmentForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const id = document.getElementById('admin-appointment-id').value;
+        const payload = {
+            patient_id: document.getElementById('appt-patient').value,
+            doctor_id: document.getElementById('appt-doctor').value,
+            appointment_date: document.getElementById('appt-date').value,
+            appointment_time: document.getElementById('appt-time').value,
+            reason: document.getElementById('appt-reason').value.trim(),
+            status: document.getElementById('appt-status').value
+        };
+        try {
+            const url = id ? `http://localhost:3000/api/admin/appointments/${id}` : 'http://localhost:3000/api/admin/appointments';
+            const method = id ? 'PUT' : 'POST';
+            const res = await fetch(url, {
+                method,
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${getAdminToken()}` },
+                body: JSON.stringify(payload)
+            });
+            const data = await res.json();
+            if (data.success) {
+                showMsg(adminAppointmentFormMsg, id ? 'Appointment updated!' : 'Appointment created!', false);
+                setTimeout(() => {
+                    adminAppointmentModal.classList.add('hidden');
+                    loadAppointmentsTable();
+                }, 1000);
+            } else {
+                showMsg(adminAppointmentFormMsg, data.error || 'Error saving appointment.', true);
+            }
+        } catch (err) {
+            showMsg(adminAppointmentFormMsg, 'Error connecting to server.', true);
+        }
+    });
+
 });
 async function adminLogin() {
     const username = document.getElementById("adminUsername").value;
