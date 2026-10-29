@@ -484,6 +484,222 @@ app.put('/api/medications/:id/taken', (req, res) => {
         res.status(500).json({ error: 'Internal Server Error' });
     }
 });
+// ============================================================
+// DD-14: DOCTOR MANAGEMENT ROUTES
+// ============================================================
+
+// GET all doctors
+app.get('/api/admin/doctors', authenticateAdmin, async (req, res) => {
+    try {
+        const { data, error } = await supabase.from('doctors').select('*').order('created_at', { ascending: false });
+        if (error) throw error;
+        res.json(data);
+    } catch (error) {
+        console.error('Error fetching doctors:', error);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+});
+
+// POST create doctor
+app.post('/api/admin/doctors', authenticateAdmin, async (req, res) => {
+    try {
+        const { full_name, email, mobile, specialization, availability } = req.body;
+        if (!full_name || !email || !mobile || !specialization) {
+            return res.status(400).json({ error: 'full_name, email, mobile, and specialization are required' });
+        }
+
+        // Check for duplicate email
+        const { data: existing } = await supabase.from('doctors').select('id').eq('email', email).limit(1);
+        if (existing && existing.length > 0) {
+            return res.status(400).json({ error: 'A doctor with this email already exists' });
+        }
+
+        const { data, error } = await supabase.from('doctors').insert([{
+            full_name, email, mobile, specialization,
+            availability: availability || 'available'
+        }]).select().single();
+        if (error) throw error;
+        res.json({ success: true, doctor: data });
+    } catch (error) {
+        console.error('Error creating doctor:', error);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+});
+
+// PUT update doctor
+app.put('/api/admin/doctors/:id', authenticateAdmin, async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { full_name, email, mobile, specialization, availability } = req.body;
+        if (!full_name || !email || !mobile || !specialization) {
+            return res.status(400).json({ error: 'full_name, email, mobile, and specialization are required' });
+        }
+
+        // Check duplicate email (excluding current doctor)
+        const { data: existing } = await supabase.from('doctors').select('id').eq('email', email).neq('id', id).limit(1);
+        if (existing && existing.length > 0) {
+            return res.status(400).json({ error: 'Another doctor with this email already exists' });
+        }
+
+        const { error } = await supabase.from('doctors').update({
+            full_name, email, mobile, specialization,
+            availability: availability || 'available'
+        }).eq('id', id);
+        if (error) throw error;
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Error updating doctor:', error);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+});
+
+// DELETE doctor (guard: reject if linked appointments exist)
+app.delete('/api/admin/doctors/:id', authenticateAdmin, async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        // Check if any non-cancelled appointments reference this doctor
+        const { data: linked } = await supabase
+            .from('appointments')
+            .select('id')
+            .eq('doctor_id', id)
+            .neq('status', 'cancelled')
+            .limit(1);
+
+        if (linked && linked.length > 0) {
+            return res.status(400).json({
+                error: 'Cannot remove doctor: there are active appointments linked to this doctor. Please cancel those appointments first.'
+            });
+        }
+
+        const { error } = await supabase.from('doctors').delete().eq('id', id);
+        if (error) throw error;
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Error deleting doctor:', error);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+});
+
+// ============================================================
+// DD-14: APPOINTMENT MANAGEMENT ROUTES
+// ============================================================
+
+// GET all appointments (with patient and doctor details joined)
+app.get('/api/admin/appointments', authenticateAdmin, async (req, res) => {
+    try {
+        const { data, error } = await supabase
+            .from('appointments')
+            .select(`
+                *,
+                patients:patient_id (id, fullname, email, mobile, username),
+                doctors:doctor_id (id, full_name, specialization)
+            `)
+            .order('appointment_date', { ascending: false })
+            .order('appointment_time', { ascending: false });
+        if (error) throw error;
+        res.json(data);
+    } catch (error) {
+        console.error('Error fetching appointments:', error);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+});
+
+// POST create appointment
+app.post('/api/admin/appointments', authenticateAdmin, async (req, res) => {
+    try {
+        const { patient_id, doctor_id, appointment_date, appointment_time, reason, status } = req.body;
+
+        if (!patient_id || !doctor_id || !appointment_date || !appointment_time) {
+            return res.status(400).json({ error: 'patient_id, doctor_id, appointment_date, and appointment_time are required' });
+        }
+
+        // Validate date is not in the past
+        const apptDate = new Date(appointment_date);
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        if (apptDate < today) {
+            return res.status(400).json({ error: 'Appointment date cannot be in the past' });
+        }
+
+        // Check for double-booking
+        const { data: conflict } = await supabase
+            .from('appointments')
+            .select('id')
+            .eq('doctor_id', doctor_id)
+            .eq('appointment_date', appointment_date)
+            .eq('appointment_time', appointment_time)
+            .neq('status', 'cancelled')
+            .limit(1);
+
+        if (conflict && conflict.length > 0) {
+            return res.status(400).json({ error: 'This doctor already has an appointment at this date and time. Please choose a different slot.' });
+        }
+
+        const { data, error } = await supabase.from('appointments').insert([{
+            patient_id, doctor_id, appointment_date, appointment_time,
+            reason: reason || '',
+            status: status || 'scheduled'
+        }]).select().single();
+        if (error) throw error;
+        res.json({ success: true, appointment: data });
+    } catch (error) {
+        console.error('Error creating appointment:', error);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+});
+
+// PUT update appointment
+app.put('/api/admin/appointments/:id', authenticateAdmin, async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { patient_id, doctor_id, appointment_date, appointment_time, reason, status } = req.body;
+
+        if (!patient_id || !doctor_id || !appointment_date || !appointment_time) {
+            return res.status(400).json({ error: 'patient_id, doctor_id, appointment_date, and appointment_time are required' });
+        }
+
+        // Check double-booking (excluding the appointment being edited)
+        const { data: conflict } = await supabase
+            .from('appointments')
+            .select('id')
+            .eq('doctor_id', doctor_id)
+            .eq('appointment_date', appointment_date)
+            .eq('appointment_time', appointment_time)
+            .neq('status', 'cancelled')
+            .neq('id', id)
+            .limit(1);
+
+        if (conflict && conflict.length > 0) {
+            return res.status(400).json({ error: 'This doctor already has an appointment at this date and time. Please choose a different slot.' });
+        }
+
+        const { error } = await supabase.from('appointments').update({
+            patient_id, doctor_id, appointment_date, appointment_time,
+            reason: reason || '',
+            status: status || 'scheduled'
+        }).eq('id', id);
+        if (error) throw error;
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Error updating appointment:', error);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+});
+
+// DELETE (cancel) appointment
+app.delete('/api/admin/appointments/:id', authenticateAdmin, async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { error } = await supabase.from('appointments').update({ status: 'cancelled' }).eq('id', id);
+        if (error) throw error;
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Error cancelling appointment:', error);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+});
+
 app.get('/test-supabase', async (req, res) => {
     try {
         const { data, error } = await supabase
