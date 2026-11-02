@@ -251,6 +251,71 @@ export async function getPatientDoctors() {
   return res.json();
 }
 
+// ---------------- Patient Notifications & Reminders ----------------
+export async function getPatientNotifications(username) {
+  const res = await fetch(`${BASE_URL}/api/patient/notifications/${encodeURIComponent(username)}`);
+  if (!res.ok) throw new Error('Failed to fetch notifications');
+  return res.json();
+}
+
+export async function markNotificationRead(id) {
+  const res = await fetch(`${BASE_URL}/api/patient/notifications/${id}/read`, {
+    method: 'PUT'
+  });
+  return res.json();
+}
+
+export async function markAllNotificationsRead(username) {
+  const res = await fetch(`${BASE_URL}/api/patient/notifications/${encodeURIComponent(username)}/read-all`, {
+    method: 'PUT'
+  });
+  return res.json();
+}
+
+export async function confirmNotificationTaken(id) {
+  const res = await fetch(`${BASE_URL}/api/patient/notifications/${id}/take`, {
+    method: 'POST'
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.message || 'Failed to mark dose taken');
+  return data;
+}
+
+export async function snoozeNotification(id, snoozeMinutes = 10) {
+  const res = await fetch(`${BASE_URL}/api/patient/notifications/${id}/snooze`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ snoozeMinutes })
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.message || 'Failed to snooze reminder');
+  return data;
+}
+
+export async function sendTestReminder(testData) {
+  const res = await fetch(`${BASE_URL}/api/patient/notifications/test`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(testData)
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.message || 'Failed to generate test reminder');
+  return data;
+}
+
+export async function clearTestNotifications(username) {
+  const res = await fetch(`${BASE_URL}/api/patient/notifications/test/${encodeURIComponent(username)}`, {
+    method: 'DELETE'
+  });
+  return res.json();
+}
+
+export async function getPatientAdherence(username) {
+  const res = await fetch(`${BASE_URL}/api/patient/adherence/${encodeURIComponent(username)}`);
+  if (!res.ok) throw new Error('Failed to fetch adherence logs');
+  return res.json();
+}
+
 // Check database connection mode
 export async function testBackendConnection() {
   try {
@@ -260,3 +325,4 @@ export async function testBackendConnection() {
     return { success: false, error: e.message };
   }
 }
+

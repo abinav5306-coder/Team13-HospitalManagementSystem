@@ -1,9 +1,14 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Menu, Bell, Calendar as CalendarIcon, Search, ShieldCheck } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { useNotifications } from '../context/NotificationContext';
+import NotificationDropdown from './NotificationDropdown';
 
 export default function Header({ title, breadcrumbs = [], setIsMobileOpen }) {
   const { adminUser, patientUser, isAdminAuthenticated } = useAuth();
+  const { unreadCount, dueCount } = useNotifications();
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+
   const user = isAdminAuthenticated ? adminUser : patientUser;
   const userName = isAdminAuthenticated
     ? (user?.name || user?.username || 'Administrator')
@@ -61,14 +66,44 @@ export default function Header({ title, breadcrumbs = [], setIsMobileOpen }) {
           <span>Active Session</span>
         </div>
 
-        {/* Notifications */}
-        <button
-          className="relative p-2 rounded-xl text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition-colors"
-          title="Notifications"
-        >
-          <Bell className="w-5 h-5" />
-          <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-blue-600 ring-2 ring-white" />
-        </button>
+        {/* Notifications (Patient Portal Only shows patient reminder dropdown; Admin portal does not display patient reminders) */}
+        {!isAdminAuthenticated ? (
+          <div className="relative">
+            <button
+              onClick={() => setIsDropdownOpen(!isDropdownOpen)}
+              className={`relative p-2.5 rounded-xl transition-all cursor-pointer ${
+                isDropdownOpen
+                  ? 'bg-blue-50 text-blue-700 ring-2 ring-blue-500/20'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+              }`}
+              title="Medicine Reminders"
+              aria-label="Medicine Reminders"
+            >
+              <Bell className={`w-5 h-5 ${dueCount > 0 ? 'text-rose-600 animate-bounce' : ''}`} />
+
+              {unreadCount > 0 && (
+                <span
+                  className={`absolute -top-1 -right-1 min-w-[20px] h-5 px-1.5 rounded-full text-[11px] font-black flex items-center justify-center text-white shadow-md ${
+                    dueCount > 0
+                      ? 'bg-rose-600 ring-2 ring-white animate-pulse'
+                      : 'bg-blue-600 ring-2 ring-white'
+                  }`}
+                >
+                  {unreadCount > 9 ? '9+' : unreadCount}
+                </span>
+              )}
+            </button>
+
+            <NotificationDropdown
+              isOpen={isDropdownOpen}
+              onClose={() => setIsDropdownOpen(false)}
+            />
+          </div>
+        ) : (
+          <div className="relative p-2 rounded-xl text-slate-400 cursor-default" title="Admin System Status">
+            <Bell className="w-5 h-5" />
+          </div>
+        )}
 
         {/* User Avatar */}
         <div className="flex items-center gap-3 pl-2 sm:pl-3 border-l border-slate-200">
