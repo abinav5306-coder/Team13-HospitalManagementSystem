@@ -12,11 +12,13 @@ import {
   Sparkles
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { useNotifications } from '../../context/NotificationContext';
 import { getPatientMedications, markMedicationTaken } from '../../services/api';
 import LoadingSpinner from '../../components/LoadingSpinner';
 
 export default function TodaySchedule() {
   const { patientUser } = useAuth();
+  const { notifications, handleTakeMedicine: handleNotifTake } = useNotifications();
   const [medications, setMedications] = useState([]);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(null);
@@ -42,12 +44,24 @@ export default function TodaySchedule() {
     }
   }, [username]);
 
+  // Sync if notification was confirmed taken
+  useEffect(() => {
+    if (notifications.some(n => n.status === 'Confirmed Taken')) {
+      fetchMeds();
+    }
+  }, [notifications]);
+
   const handleMarkTaken = async (id) => {
     try {
       setActionLoading(id);
       setMedications(prev => prev.map(m => m.id === id ? { ...m, taken: true } : m));
       await markMedicationTaken(id);
       showToast('Dose confirmed as taken for today!');
+      // Sync matching due notification if one exists
+      const match = notifications.find(n => n.medication_id === id && n.status === 'Due');
+      if (match) {
+        handleNotifTake(match.id).catch(() => {});
+      }
     } catch (err) {
       console.error('Failed to mark taken:', err);
       setMedications(prev => prev.map(m => m.id === id ? { ...m, taken: false } : m));

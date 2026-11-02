@@ -7,6 +7,7 @@ const nodemailer = require('nodemailer');
 const crypto = require('crypto');
 const { createClient } = require('@supabase/supabase-js');
 const bcrypt = require('bcrypt');
+const cron = require('node-cron');
 
 const app = express();
 
@@ -43,6 +44,8 @@ if (!fs.existsSync(dbPath)) {
         doctors: [],
         appointments: [],
         medications: [],
+        notifications: [],
+        medication_adherence: [],
         admins: [{ id: 'admin-1', username: 'admin', email: 'admin@hospital.com', password: 'password123', name: 'System Administrator' }]
     }, null, 2));
 } else {
@@ -57,6 +60,8 @@ if (!fs.existsSync(dbPath)) {
         if (!db.doctors) { db.doctors = []; updated = true; }
         if (!db.appointments) { db.appointments = []; updated = true; }
         if (!db.medications) { db.medications = []; updated = true; }
+        if (!db.notifications) { db.notifications = []; updated = true; }
+        if (!db.medication_adherence) { db.medication_adherence = []; updated = true; }
         if (updated) {
             fs.writeFileSync(dbPath, JSON.stringify(db, null, 2));
         }
@@ -592,11 +597,20 @@ app.post('/api/admin/medications', authenticateAdmin, (req, res) => {
             medicineName: req.body.medicineName,
             dosage: req.body.dosage,
             scheduleTime: req.body.scheduleTime,
-            taken: false
+            instructions: req.body.instructions || 'Take as prescribed with water',
+            quantity: req.body.quantity || '1 tablet',
+            taken: false,
+            created_at: new Date().toISOString()
         };
         db.medications = db.medications || [];
         db.medications.push(newMed);
         writeDB(db);
+
+        // Run scheduler tick immediately to check new prescription
+        setTimeout(() => {
+            runMedicationReminderScheduler();
+        }, 500);
+
         res.json({ success: true, medication: newMed });
     } catch (error) {
         res.status(500).json({ error: 'Internal Server Error' });
@@ -609,11 +623,445 @@ app.put('/api/medications/:id/taken', (req, res) => {
         const med = (db.medications || []).find(m => m.id === req.params.id);
         if (med) {
             med.taken = true;
+            med.taken_at = new Date().toISOString();
+            
+            // Also log clinical adherence
+            db.medication_adherence = db.medication_adherence || [];
+            db.medication_adherence.unshift({
+                id: 'adh-' + Date.now() + '-' + Math.random().toString(36).substr(2, 6),
+                patient_username: med.patientUsername,
+                medication_id: med.id,
+                medicine_name: med.medicineName,
+                dosage: med.dosage || '',
+                scheduled_time: med.scheduleTime || '',
+                confirmed_at: new Date().toISOString(),
+                status: 'taken',
+                notes: 'Recorded taken directly from medication schedule',
+                created_at: new Date().toISOString()
+            });
+
             writeDB(db);
             res.json({ success: true });
         } else {
             res.status(404).json({ success: false, message: 'Not found' });
         }
+    } catch (error) {
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+});
+
+// ============================================================
+// AUTOMATED MEDICINE REMINDERS & PATIENT NOTIFICATION SYSTEM
+// ============================================================
+
+// Helper: Asia/Kolkata current time & date
+function getKolkataTime() {
+    const now = new Date();
+    const formatter = new Intl.DateTimeFormat('en-IN', {
+        timeZone: 'Asia/Kolkata',
+        hour12: false,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit'
+    });
+    const parts = formatter.formatToParts(now);
+    const map = {};
+    parts.forEach(p => map[p.type] = p.value);
+    const hours = parseInt(map.hour, 10);
+    const minutes = parseInt(map.minute, 10);
+    const seconds = parseInt(map.second, 10);
+    return {
+        dateStr: `${map.year}-${map.month}-${map.day}`,
+        hours,
+        minutes,
+        seconds,
+        totalMinutes: hours * 60 + minutes,
+        timeStr: `${map.hour}:${map.minute}`
+    };
+}
+
+// Helper: Parse schedule time ("08:00 AM", "08:00", "8:30 PM", "14:00") into minutes from midnight
+function parseScheduleTimeToMinutes(scheduleTimeStr) {
+    if (!scheduleTimeStr) return null;
+    const clean = scheduleTimeStr.trim().toUpperCase();
+    const isPM = clean.includes('PM');
+    const isAM = clean.includes('AM');
+    const match = clean.match(/(\d{1,2}):(\d{2})/);
+    if (!match) return null;
+    let hours = parseInt(match[1], 10);
+    const minutes = parseInt(match[2], 10);
+    if (isPM && hours < 12) hours += 12;
+    if (isAM && hours === 12) hours = 0;
+    return hours * 60 + minutes;
+}
+
+// Automatic Reminder Scheduler Core Logic (Asia/Kolkata timezone)
+async function runMedicationReminderScheduler() {
+    try {
+        const kolkata = getKolkataTime();
+        const db = readDB();
+        const medications = db.medications || [];
+        const patients = db.patients || [];
+        db.notifications = db.notifications || [];
+        db.medication_adherence = db.medication_adherence || [];
+
+        let changesMade = false;
+
+        // 1. Process Snoozed notifications: Check if snooze window has expired
+        for (const notif of db.notifications) {
+            if (notif.status === 'Snoozed' && notif.snooze_until) {
+                const snoozeTime = new Date(notif.snooze_until).getTime();
+                if (Date.now() >= snoozeTime) {
+                    notif.status = 'Due';
+                    notif.notification_type = 'Snoozed Reminder';
+                    notif.is_read = false;
+                    notif.updated_at = new Date().toISOString();
+                    changesMade = true;
+                    console.log(`[Scheduler] Snoozed reminder awakened for ${notif.patient_username}: ${notif.medicine_name}`);
+                }
+            }
+        }
+
+        // 2. Process active medications for all patients
+        for (const med of medications) {
+            if (!med.patientUsername || !med.scheduleTime) continue;
+
+            const scheduledMinutes = parseScheduleTimeToMinutes(med.scheduleTime);
+            if (scheduledMinutes === null) continue;
+
+            // Unique reminder occurrence key: patient_medId_date_scheduledTime
+            const reminderKey = `${med.patientUsername}_${med.id}_${kolkata.dateStr}_${med.scheduleTime}`;
+
+            // Check if reminder already generated for this occurrence (prevents duplicate on reload/restart)
+            const existing = db.notifications.find(n => n.reminder_key === reminderKey);
+            if (existing) continue;
+
+            // Is the scheduled time due?
+            // Due when current time in Kolkata has reached or passed scheduled time today
+            const isDue = kolkata.totalMinutes >= scheduledMinutes;
+
+            if (isDue) {
+                const patient = patients.find(p => p.username === med.patientUsername);
+                const patientName = patient?.fullname || patient?.name || med.patientUsername || 'Patient';
+                const dosageStr = med.dosage ? `${med.dosage}` : '';
+                const qtyStr = med.quantity || (med.dosage && med.dosage.toLowerCase().includes('tablet') ? med.dosage : '1 tablet');
+                const instructionStr = med.instructions || 'Please take it as prescribed with water.';
+
+                const newNotif = {
+                    id: 'notif-' + Date.now() + '-' + Math.random().toString(36).substr(2, 6),
+                    patient_id: patient?.id || med.patientUsername,
+                    patient_username: med.patientUsername,
+                    medication_id: med.id,
+                    notification_title: `Time to take ${med.medicineName}`,
+                    notification_message: `Hello ${patientName}! It is time to take your ${med.medicineName} ${dosageStr}. Your scheduled medicine time is ${med.scheduleTime}. ${instructionStr}`,
+                    medicine_name: med.medicineName,
+                    dosage: med.dosage || '',
+                    scheduled_time: med.scheduleTime,
+                    scheduled_date: kolkata.dateStr,
+                    instructions: instructionStr,
+                    quantity: qtyStr,
+                    notification_type: 'Medicine Due',
+                    status: 'Due',
+                    is_read: false,
+                    is_test: false,
+                    reminder_key: reminderKey,
+                    snooze_until: null,
+                    taken_at: null,
+                    created_at: new Date().toISOString(),
+                    updated_at: new Date().toISOString()
+                };
+
+                db.notifications.unshift(newNotif);
+                changesMade = true;
+                console.log(`[Scheduler] Generated medicine reminder for ${med.patientUsername}: ${med.medicineName} (${med.scheduleTime})`);
+
+                if (supabase) {
+                    try {
+                        await supabase.from('notifications').upsert([newNotif], { onConflict: 'reminder_key' });
+                    } catch (sErr) {
+                        console.warn('[Scheduler] Supabase notification sync warning:', sErr.message);
+                    }
+                }
+            }
+        }
+
+        if (changesMade) {
+            writeDB(db);
+        }
+    } catch (schedErr) {
+        console.error('[Scheduler] Error running reminder scheduler:', schedErr);
+    }
+}
+
+// Run scheduler every 30 seconds
+cron.schedule('*/30 * * * * *', () => {
+    runMedicationReminderScheduler();
+}, {
+    timezone: 'Asia/Kolkata'
+});
+
+// Run initial check on server startup
+setTimeout(() => {
+    runMedicationReminderScheduler();
+}, 2000);
+
+// --- PATIENT NOTIFICATIONS ENDPOINTS ---
+
+// GET: Fetch all notifications for a patient (Patient-Only)
+app.get('/api/patient/notifications/:username', (req, res) => {
+    try {
+        const username = req.params.username;
+        const db = readDB();
+        const allNotifs = (db.notifications || []).filter(n => n.patient_username === username);
+
+        // Sort descending by created_at
+        allNotifs.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+
+        const unreadCount = allNotifs.filter(n => !n.is_read).length;
+        const dueCount = allNotifs.filter(n => n.status === 'Due').length;
+        const kolkata = getKolkataTime();
+
+        res.json({
+            success: true,
+            notifications: allNotifs,
+            unreadCount,
+            dueCount,
+            kolkataTime: kolkata
+        });
+    } catch (error) {
+        console.error('Error fetching patient notifications:', error);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+});
+
+// PUT: Mark a single notification as read
+app.put('/api/patient/notifications/:id/read', (req, res) => {
+    try {
+        const db = readDB();
+        const notif = (db.notifications || []).find(n => n.id === req.params.id);
+        if (notif) {
+            notif.is_read = true;
+            notif.updated_at = new Date().toISOString();
+            writeDB(db);
+            return res.json({ success: true, notification: notif });
+        }
+        res.status(404).json({ success: false, message: 'Notification not found' });
+    } catch (error) {
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+});
+
+// PUT: Mark all notifications as read for a patient
+app.put('/api/patient/notifications/:username/read-all', (req, res) => {
+    try {
+        const username = req.params.username;
+        const db = readDB();
+        let count = 0;
+        (db.notifications || []).forEach(n => {
+            if (n.patient_username === username && !n.is_read) {
+                n.is_read = true;
+                n.updated_at = new Date().toISOString();
+                count++;
+            }
+        });
+        if (count > 0) {
+            writeDB(db);
+        }
+        res.json({ success: true, count });
+    } catch (error) {
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+});
+
+// POST: Mark medicine as taken from a reminder notification
+app.post('/api/patient/notifications/:id/take', async (req, res) => {
+    try {
+        const db = readDB();
+        db.notifications = db.notifications || [];
+        db.medications = db.medications || [];
+        db.medication_adherence = db.medication_adherence || [];
+
+        const notif = db.notifications.find(n => n.id === req.params.id);
+        if (!notif) {
+            return res.status(404).json({ success: false, message: 'Notification not found' });
+        }
+
+        const nowIso = new Date().toISOString();
+        notif.status = 'Confirmed Taken';
+        notif.is_read = true;
+        notif.taken_at = nowIso;
+        notif.updated_at = nowIso;
+
+        // Strictly check if test notification: test reminders must NOT modify real records!
+        if (!notif.is_test) {
+            // 1. Update medication adherence on the actual medication
+            if (notif.medication_id) {
+                const med = db.medications.find(m => m.id === notif.medication_id);
+                if (med) {
+                    med.taken = true;
+                    med.taken_at = nowIso;
+                }
+            }
+
+            // 2. Record permanent clinical adherence record
+            const adherenceRecord = {
+                id: 'adh-' + Date.now() + '-' + Math.random().toString(36).substr(2, 6),
+                patient_username: notif.patient_username,
+                medication_id: notif.medication_id || '',
+                medicine_name: notif.medicine_name,
+                dosage: notif.dosage || '',
+                scheduled_time: notif.scheduled_time || '',
+                confirmed_at: nowIso,
+                status: 'taken',
+                notes: 'Confirmed taken by patient via reminder notification',
+                created_at: nowIso
+            };
+            db.medication_adherence.unshift(adherenceRecord);
+
+            if (supabase) {
+                try {
+                    await supabase.from('medication_adherence').insert([adherenceRecord]);
+                } catch (sErr) {
+                    console.warn('[Supabase] Adherence log insert warning:', sErr.message);
+                }
+            }
+        }
+
+        writeDB(db);
+        res.json({
+            success: true,
+            notification: notif,
+            message: notif.is_test ? 'Test dose marked as taken (simulated only)' : 'Medication adherence recorded successfully'
+        });
+    } catch (error) {
+        console.error('Error confirming taken:', error);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+});
+
+// POST: Snooze reminder (Remind Me Later: 10m or 15m)
+app.post('/api/patient/notifications/:id/snooze', (req, res) => {
+    try {
+        const snoozeMinutes = parseInt(req.body.snoozeMinutes, 10) || 10;
+        const db = readDB();
+        const notif = (db.notifications || []).find(n => n.id === req.params.id);
+        if (!notif) {
+            return res.status(404).json({ success: false, message: 'Notification not found' });
+        }
+
+        const now = Date.now();
+        const snoozeUntil = new Date(now + snoozeMinutes * 60 * 1000).toISOString();
+
+        notif.status = 'Snoozed';
+        notif.notification_type = 'Snoozed Reminder';
+        notif.snooze_until = snoozeUntil;
+        notif.updated_at = new Date().toISOString();
+
+        writeDB(db);
+        res.json({
+            success: true,
+            notification: notif,
+            snoozeUntil,
+            message: `Reminder snoozed for ${snoozeMinutes} minutes`
+        });
+    } catch (error) {
+        console.error('Error snoozing notification:', error);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+});
+
+// POST: Generate immediate TEST reminder in patient dashboard
+app.post('/api/patient/notifications/test', async (req, res) => {
+    try {
+        const {
+            patientUsername,
+            medicationId,
+            medicineName,
+            dosage,
+            scheduleTime,
+            instructions,
+            quantity,
+            simulationType // 'due' or 'upcoming'
+        } = req.body;
+
+        if (!patientUsername || !medicineName) {
+            return res.status(400).json({ success: false, message: 'patientUsername and medicineName are required' });
+        }
+
+        const db = readDB();
+        db.notifications = db.notifications || [];
+        const patients = db.patients || [];
+        const patient = patients.find(p => p.username === patientUsername);
+        const patientName = patient?.fullname || patient?.name || patientUsername;
+
+        const kolkata = getKolkataTime();
+        const isUpcoming = simulationType === 'upcoming';
+        const notifStatus = isUpcoming ? 'Upcoming' : 'Due';
+        const notifType = isUpcoming ? 'Medicine Upcoming' : 'Test Reminder';
+        const dosageDisplay = dosage ? `${dosage}` : '';
+        const timeDisplay = scheduleTime || kolkata.timeStr;
+
+        const testNotif = {
+            id: 'test-notif-' + Date.now() + '-' + Math.random().toString(36).substr(2, 6),
+            patient_id: patient?.id || patientUsername,
+            patient_username: patientUsername,
+            medication_id: medicationId || 'test-med-' + Date.now(),
+            notification_title: `TEST REMINDER: ${medicineName}`,
+            notification_message: `TEST REMINDER: It is time to take your ${medicineName} ${dosageDisplay}. Your scheduled time is ${timeDisplay}. ${instructions || 'Please take it as prescribed.'}`,
+            medicine_name: medicineName,
+            dosage: dosage || '',
+            scheduled_time: timeDisplay,
+            scheduled_date: kolkata.dateStr,
+            instructions: instructions || 'Simulated test reminder. Take with water.',
+            quantity: quantity || '1 tablet',
+            notification_type: notifType,
+            status: notifStatus,
+            is_read: false,
+            is_test: true,
+            reminder_key: `test_${patientUsername}_${Date.now()}_${Math.random()}`,
+            snooze_until: null,
+            taken_at: null,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+        };
+
+        db.notifications.unshift(testNotif);
+        writeDB(db);
+
+        console.log(`[Test Mode] Sent simulated test reminder for ${patientUsername}: ${medicineName}`);
+        res.json({ success: true, notification: testNotif });
+    } catch (error) {
+        console.error('Error generating test notification:', error);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+});
+
+// DELETE: Clear test notification history for a patient
+app.delete('/api/patient/notifications/test/:username', (req, res) => {
+    try {
+        const username = req.params.username;
+        const db = readDB();
+        const initialCount = (db.notifications || []).length;
+        db.notifications = (db.notifications || []).filter(n => !(n.patient_username === username && n.is_test));
+        const deletedCount = initialCount - db.notifications.length;
+        writeDB(db);
+        res.json({ success: true, deletedCount });
+    } catch (error) {
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+});
+
+// GET: Clinical adherence history for a patient
+app.get('/api/patient/adherence/:username', (req, res) => {
+    try {
+        const username = req.params.username;
+        const db = readDB();
+        const records = (db.medication_adherence || []).filter(a => a.patient_username === username);
+        records.sort((a, b) => new Date(b.confirmed_at) - new Date(a.confirmed_at));
+        res.json({ success: true, adherence: records });
     } catch (error) {
         res.status(500).json({ error: 'Internal Server Error' });
     }

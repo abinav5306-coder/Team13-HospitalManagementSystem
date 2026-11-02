@@ -12,19 +12,35 @@ import {
   ShieldCheck,
   Activity,
   PhoneCall,
-  UserCheck
+  UserCheck,
+  FlaskConical,
+  Bell,
+  Sparkles,
+  RotateCcw
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { useNotifications } from '../../context/NotificationContext';
 import { getPatientMedications, markMedicationTaken, getPatientAppointments } from '../../services/api';
 import LoadingSpinner from '../../components/LoadingSpinner';
 
 export default function PatientOverview() {
   const { patientUser } = useAuth();
+  const {
+    notifications,
+    dueCount,
+    setTestModeOpen,
+    handleTakeMedicine,
+    handleSnooze,
+    browserPermission,
+    requestBrowserPermission
+  } = useNotifications();
+
   const [medications, setMedications] = useState([]);
   const [appointments, setAppointments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(null);
   const [toastMessage, setToastMessage] = useState(null);
+  const [historyTab, setHistoryTab] = useState('all'); // 'all', 'clinical', 'test'
 
   const username = patientUser?.username || '';
   const patientId = patientUser?.id || username;
@@ -52,6 +68,15 @@ export default function PatientOverview() {
     }
   }, [username, patientId]);
 
+  // Sync when notifications change (e.g. marked taken)
+  useEffect(() => {
+    if (notifications.some(n => n.status === 'Confirmed Taken')) {
+      getPatientMedications(username)
+        .then(data => Array.isArray(data) && setMedications(data))
+        .catch(() => {});
+    }
+  }, [notifications, username]);
+
   const handleMarkTaken = async (medId) => {
     try {
       setActionLoading(medId);
@@ -59,9 +84,13 @@ export default function PatientOverview() {
       setMedications(prev => prev.map(m => m.id === medId ? { ...m, taken: true } : m));
       await markMedicationTaken(medId);
       showToast('Medication recorded as taken. Great job keeping up with your health!');
+      // Also sync if there was an active notification for this medication
+      const matchingNotif = notifications.find(n => n.medication_id === medId && n.status === 'Due');
+      if (matchingNotif) {
+        handleTakeMedicine(matchingNotif.id).catch(() => {});
+      }
     } catch (err) {
       console.error('Failed to mark taken:', err);
-      // Revert if error
       setMedications(prev => prev.map(m => m.id === medId ? { ...m, taken: false } : m));
       showToast('Could not record status. Please try again.', true);
     } finally {
@@ -86,6 +115,7 @@ export default function PatientOverview() {
   });
 
   const nextAppointment = appointments.find(a => a.status === 'scheduled');
+  const dueNotifications = notifications.filter(n => n.status === 'Due');
 
   if (loading) {
     return <LoadingSpinner fullScreen={false} text="Loading your health portal..." />;
@@ -104,6 +134,197 @@ export default function PatientOverview() {
           <span className="font-medium text-sm">{toastMessage.text}</span>
         </div>
       )}
+
+      {/* ============================================================ */}
+      {/* URGENT: DUE MEDICINE REMINDER CARDS (PHASE 2 & PHASE 8)      */}
+      {/* ============================================================ */}
+      {dueNotifications.length > 0 && (
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className="w-3 h-3 rounded-full bg-rose-600 animate-ping" />
+              <h2 className="text-base sm:text-lg font-black text-rose-700 tracking-tight flex items-center gap-2">
+                <span>Medicine Due Right Now</span>
+                <span className="px-2 py-0.5 rounded-full text-xs font-black bg-rose-100 text-rose-800 border border-rose-200">
+                  {dueNotifications.length} Action Required
+                </span>
+              </h2>
+            </div>
+            <span className="text-xs text-slate-500 font-medium hidden sm:inline">
+              Please take your scheduled dose as prescribed by your doctor.
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {dueNotifications.map((notif) => (
+              <div
+                key={notif.id}
+                className={`relative overflow-hidden rounded-2xl p-5 border-2 shadow-lg transition-all ${
+                  notif.is_test
+                    ? 'bg-amber-50/90 border-amber-400 text-slate-900 shadow-amber-900/10'
+                    : 'bg-gradient-to-br from-white to-rose-50/40 border-rose-400 text-slate-900 shadow-rose-900/10'
+                }`}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex items-start gap-3">
+                    <div
+                      className={`w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0 ${
+                        notif.is_test
+                          ? 'bg-amber-500 text-white font-bold'
+                          : 'bg-rose-600 text-white font-bold shadow-md shadow-rose-600/30'
+                      }`}
+                    >
+                      <Pill className="w-6 h-6 animate-pulse" />
+                    </div>
+
+                    <div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <h3 className="font-extrabold text-base text-slate-900 font-['Plus_Jakarta_Sans']">
+                          {notif.medicine_name}
+                        </h3>
+                        {notif.is_test ? (
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-amber-500 text-slate-950">
+                            TEST
+                          </span>
+                        ) : (
+                          <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-rose-600 text-white shadow-xs animate-pulse">
+                            DUE NOW
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="flex items-center gap-3 text-xs text-slate-600 mt-1 font-semibold">
+                        {notif.dosage && <span>Dosage: {notif.dosage}</span>}
+                        {notif.scheduled_time && (
+                          <span className="flex items-center gap-1 text-rose-700 font-bold">
+                            <Clock className="w-3.5 h-3.5 text-rose-600" />
+                            {notif.scheduled_time}
+                          </span>
+                        )}
+                        {notif.quantity && <span>Qty: {notif.quantity}</span>}
+                      </div>
+
+                      <p className="text-xs text-slate-700 mt-2 bg-white/70 p-2.5 rounded-xl border border-slate-200/80 leading-relaxed font-medium">
+                        {notif.notification_message}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Big Elderly-Friendly Buttons */}
+                <div className="mt-4 pt-3 border-t border-slate-200/70 flex flex-wrap items-center gap-2.5">
+                  <button
+                    onClick={() => handleTakeMedicine(notif.id)}
+                    className="flex-1 min-w-[140px] flex items-center justify-center gap-2 px-5 py-3 rounded-xl font-bold text-sm text-white bg-emerald-600 hover:bg-emerald-500 active:scale-95 shadow-md shadow-emerald-700/20 transition-all cursor-pointer"
+                  >
+                    <CheckCircle2 className="w-5 h-5" />
+                    <span>MARK AS TAKEN</span>
+                  </button>
+
+                  <button
+                    onClick={() => handleSnooze(notif.id, 10)}
+                    className="flex items-center justify-center gap-1.5 px-3.5 py-3 rounded-xl font-bold text-xs text-slate-700 bg-white border border-slate-300 hover:bg-slate-100 active:scale-95 transition-all cursor-pointer"
+                    title="Remind me in 10 minutes"
+                  >
+                    <Clock className="w-4 h-4 text-purple-600" />
+                    <span>Snooze 10m</span>
+                  </button>
+
+                  <button
+                    onClick={() => handleSnooze(notif.id, 15)}
+                    className="flex items-center justify-center gap-1.5 px-3.5 py-3 rounded-xl font-bold text-xs text-slate-700 bg-white border border-slate-300 hover:bg-slate-100 active:scale-95 transition-all cursor-pointer"
+                    title="Remind me in 15 minutes"
+                  >
+                    <Clock className="w-4 h-4 text-purple-600" />
+                    <span>Snooze 15m</span>
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ============================================================ */}
+      {/* TEST MODE & BROWSER NOTIFICATIONS CONTROL BANNER             */}
+      {/* ============================================================ */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        {/* Test Mode Card */}
+        <div className="md:col-span-2 bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600 text-white rounded-2xl p-5 shadow-lg flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+          <div className="flex items-center gap-3.5">
+            <div className="w-12 h-12 rounded-xl bg-white/20 backdrop-blur-md flex items-center justify-center text-white ring-2 ring-white/30 flex-shrink-0">
+              <FlaskConical className="w-6 h-6 animate-pulse" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="font-black text-base font-['Plus_Jakarta_Sans']">
+                  Reminder Test Mode
+                </h3>
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase bg-slate-950/40 text-amber-200">
+                  Patient Sandbox
+                </span>
+              </div>
+              <p className="text-xs text-amber-100 mt-1 max-w-lg leading-relaxed">
+                Test audio chimes, toasts, and reminders instantly using your actual prescribed medicines without waiting for scheduled times.
+              </p>
+            </div>
+          </div>
+
+          <button
+            onClick={() => setTestModeOpen(true)}
+            className="flex-shrink-0 flex items-center gap-2 px-5 py-2.5 rounded-xl font-black text-xs uppercase tracking-wider text-slate-950 bg-white hover:bg-amber-50 active:scale-95 shadow-md shadow-orange-950/20 transition-all cursor-pointer"
+          >
+            <Sparkles className="w-4 h-4 text-orange-600" />
+            <span>Launch Test Mode</span>
+          </button>
+        </div>
+
+        {/* Browser Push Permission Card */}
+        <div className="bg-white rounded-2xl p-5 border border-slate-200/80 shadow-sm flex flex-col justify-between">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Bell className="w-4 h-4 text-blue-600" />
+              <span className="text-xs font-bold uppercase tracking-wider text-slate-700">
+                Desktop Alerts
+              </span>
+            </div>
+            <span
+              className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                browserPermission === 'granted'
+                  ? 'bg-emerald-100 text-emerald-800'
+                  : 'bg-slate-100 text-slate-600'
+              }`}
+            >
+              {browserPermission === 'granted' ? 'Enabled' : 'Disabled'}
+            </span>
+          </div>
+
+          <div className="mt-2">
+            <p className="text-xs text-slate-600">
+              {browserPermission === 'granted'
+                ? 'Desktop medicine alerts are enabled and will pop up even when viewing other tabs.'
+                : 'Turn on desktop notifications to hear chimes and get timely medicine alerts.'}
+            </p>
+          </div>
+
+          <div className="mt-3 pt-2">
+            {browserPermission !== 'granted' ? (
+              <button
+                onClick={requestBrowserPermission}
+                className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 transition-colors"
+              >
+                <Bell className="w-3.5 h-3.5" />
+                <span>Enable Desktop Alerts</span>
+              </button>
+            ) : (
+              <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-700">
+                <CheckCircle2 className="w-4 h-4" />
+                <span>Active on this device</span>
+              </span>
+            )}
+          </div>
+        </div>
+      </div>
 
       {/* Hero Welcome Banner */}
       <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-blue-700 via-indigo-700 to-blue-900 text-white p-6 sm:p-8 shadow-xl">
@@ -130,7 +351,7 @@ export default function PatientOverview() {
               className="inline-flex items-center gap-2 px-4 py-2.5 bg-white text-blue-700 rounded-xl font-bold text-sm shadow-md hover:bg-blue-50 transition-colors"
             >
               <Clock className="w-4 h-4" />
-              View Today's Routine
+              View Today&apos;s Routine
             </Link>
             <Link
               to="/patient/appointments"
@@ -139,6 +360,13 @@ export default function PatientOverview() {
               <Calendar className="w-4 h-4" />
               My Consultations
             </Link>
+            <button
+              onClick={() => setTestModeOpen(true)}
+              className="inline-flex items-center gap-2 px-4 py-2.5 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-300/40 text-amber-200 rounded-xl font-bold text-sm transition-colors cursor-pointer"
+            >
+              <FlaskConical className="w-4 h-4 text-amber-300" />
+              Test Reminders
+            </button>
           </div>
         </div>
       </div>
@@ -407,6 +635,162 @@ export default function PatientOverview() {
             </div>
           </div>
         </div>
+      </div>
+
+      {/* ============================================================ */}
+      {/* NOTIFICATION & REMINDER ADHERENCE HISTORY (PHASE 2 & PHASE 8) */}
+      {/* ============================================================ */}
+      <div className="bg-white rounded-2xl p-6 border border-slate-200/90 shadow-sm space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5">
+            <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center font-bold">
+              <Bell className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="font-bold text-base text-slate-900 font-['Plus_Jakarta_Sans']">
+                Medicine Reminder History & Logs
+              </h3>
+              <p className="text-xs text-slate-500">
+                Review automated alerts, confirmed dosage logs, and simulated tests.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <div className="flex items-center p-1 bg-slate-100 rounded-xl text-xs font-semibold text-slate-600">
+              <button
+                onClick={() => setHistoryTab('all')}
+                className={`px-3 py-1.5 rounded-lg transition-all ${
+                  historyTab === 'all' ? 'bg-white text-blue-600 shadow-xs font-bold' : 'hover:text-slate-900'
+                }`}
+              >
+                All ({notifications.length})
+              </button>
+              <button
+                onClick={() => setHistoryTab('clinical')}
+                className={`px-3 py-1.5 rounded-lg transition-all ${
+                  historyTab === 'clinical' ? 'bg-white text-blue-600 shadow-xs font-bold' : 'hover:text-slate-900'
+                }`}
+              >
+                Clinical ({notifications.filter(n => !n.is_test).length})
+              </button>
+              <button
+                onClick={() => setHistoryTab('test')}
+                className={`px-3 py-1.5 rounded-lg transition-all ${
+                  historyTab === 'test' ? 'bg-white text-amber-700 shadow-xs font-bold' : 'hover:text-slate-900'
+                }`}
+              >
+                Test Logs ({notifications.filter(n => n.is_test).length})
+              </button>
+            </div>
+
+            <button
+              onClick={() => setTestModeOpen(true)}
+              className="hidden sm:inline-flex items-center gap-1.5 px-3 py-2 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200/80 rounded-xl text-xs font-bold transition-colors cursor-pointer"
+            >
+              <FlaskConical className="w-3.5 h-3.5 text-amber-600" />
+              <span>Test Mode</span>
+            </button>
+          </div>
+        </div>
+
+        {/* History items */}
+        {notifications.length === 0 ? (
+          <div className="py-8 text-center text-slate-400 text-xs">
+            No medicine reminder logs recorded yet today. Reminders will generate automatically at your scheduled times.
+          </div>
+        ) : (
+          <div className="divide-y divide-slate-100">
+            {notifications
+              .filter((n) => {
+                if (historyTab === 'clinical') return !n.is_test;
+                if (historyTab === 'test') return n.is_test;
+                return true;
+              })
+              .slice(0, 8)
+              .map((n) => (
+                <div key={n.id} className="py-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+                  <div className="flex items-start gap-3">
+                    <div
+                      className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 ${
+                        n.is_test
+                          ? 'bg-amber-100 text-amber-800'
+                          : n.status === 'Confirmed Taken'
+                          ? 'bg-emerald-100 text-emerald-800'
+                          : n.status === 'Due'
+                          ? 'bg-rose-100 text-rose-800'
+                          : 'bg-blue-100 text-blue-800'
+                      }`}
+                    >
+                      <Pill className="w-4 h-4" />
+                    </div>
+
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-slate-900 text-sm">{n.medicine_name}</span>
+                        {n.dosage && <span className="text-slate-500 font-medium">({n.dosage})</span>}
+                        {n.is_test && (
+                          <span className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase bg-amber-500 text-slate-950">
+                            TEST
+                          </span>
+                        )}
+                        <span
+                          className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                            n.status === 'Confirmed Taken'
+                              ? 'bg-emerald-100 text-emerald-800'
+                              : n.status === 'Due'
+                              ? 'bg-rose-100 text-rose-800'
+                              : n.status === 'Snoozed'
+                              ? 'bg-purple-100 text-purple-800'
+                              : 'bg-blue-100 text-blue-800'
+                          }`}
+                        >
+                          {n.status}
+                        </span>
+                      </div>
+
+                      <p className="text-slate-600 mt-1 line-clamp-1">{n.notification_message}</p>
+
+                      <div className="flex items-center gap-3 text-[11px] text-slate-400 mt-1">
+                        <span className="flex items-center gap-1">
+                          <Clock className="w-3 h-3" />
+                          Scheduled: {n.scheduled_time}
+                        </span>
+                        {n.taken_at && (
+                          <span className="text-emerald-700 font-semibold">
+                            Taken at: {new Date(n.taken_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          </span>
+                        )}
+                        {n.snooze_until && n.status === 'Snoozed' && (
+                          <span className="text-purple-700 font-semibold">
+                            Snoozed until: {new Date(n.snooze_until).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Actions if Due or Snoozed */}
+                  {(n.status === 'Due' || n.status === 'Snoozed') && (
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      <button
+                        onClick={() => handleTakeMedicine(n.id)}
+                        className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-xs transition-colors"
+                      >
+                        Mark Taken
+                      </button>
+                      <button
+                        onClick={() => handleSnooze(n.id, 10)}
+                        className="px-2.5 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-xs transition-colors"
+                      >
+                        10m
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ))}
+          </div>
+        )}
       </div>
     </div>
   );
