@@ -3,21 +3,16 @@ import { Navigate, Outlet, useLocation } from 'react-router-dom';
 import Sidebar from '../components/Sidebar';
 import Header from '../components/Header';
 import { useAuth } from '../context/AuthContext';
+import { NotificationProvider, useNotifications } from '../context/NotificationContext';
+import NotificationToast from '../components/NotificationToast';
+import TestModeModal from '../components/TestModeModal';
 import LoadingSpinner from '../components/LoadingSpinner';
 
-export default function PatientLayout() {
-  const { isPatientAuthenticated, loading } = useAuth();
+function PatientLayoutInner() {
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [isMobileOpen, setIsMobileOpen] = useState(false);
+  const { testModeOpen, setTestModeOpen } = useNotifications();
   const location = useLocation();
-
-  if (loading) {
-    return <LoadingSpinner fullScreen text="Loading patient portal..." />;
-  }
-
-  if (!isPatientAuthenticated) {
-    return <Navigate to="/login" state={{ from: location }} replace />;
-  }
 
   const getHeaderInfo = () => {
     const path = location.pathname;
@@ -68,6 +63,34 @@ export default function PatientLayout() {
           <Outlet />
         </main>
       </div>
+
+      {/* Real-time Medicine Reminder Toast */}
+      <NotificationToast />
+
+      {/* Dedicated Patient Test Mode Modal */}
+      <TestModeModal
+        isOpen={testModeOpen}
+        onClose={() => setTestModeOpen(false)}
+      />
     </div>
+  );
+}
+
+export default function PatientLayout() {
+  const { isPatientAuthenticated, loading } = useAuth();
+  const location = useLocation();
+
+  if (loading) {
+    return <LoadingSpinner fullScreen text="Loading patient portal..." />;
+  }
+
+  if (!isPatientAuthenticated) {
+    return <Navigate to="/login" state={{ from: location }} replace />;
+  }
+
+  return (
+    <NotificationProvider>
+      <PatientLayoutInner />
+    </NotificationProvider>
   );
 }

@@ -7,15 +7,17 @@ import {
   Pill, 
   ShieldCheck, 
   Award,
-  Sparkles
+  Sparkles,
+  Check
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
-import { getPatientMedications } from '../../services/api';
+import { getPatientMedications, getPatientAdherence } from '../../services/api';
 import LoadingSpinner from '../../components/LoadingSpinner';
 
 export default function MedicationHistory() {
   const { patientUser } = useAuth();
   const [medications, setMedications] = useState([]);
+  const [adherenceLogs, setAdherenceLogs] = useState([]);
   const [loading, setLoading] = useState(true);
 
   const username = patientUser?.username || '';
@@ -24,8 +26,12 @@ export default function MedicationHistory() {
     async function loadData() {
       try {
         setLoading(true);
-        const data = await getPatientMedications(username);
-        setMedications(Array.isArray(data) ? data : []);
+        const [medsData, adhData] = await Promise.all([
+          getPatientMedications(username).catch(() => []),
+          getPatientAdherence(username).catch(() => ({ adherence: [] }))
+        ]);
+        setMedications(Array.isArray(medsData) ? medsData : []);
+        setAdherenceLogs(adhData?.adherence || []);
       } catch (err) {
         console.error('Failed to load medication history:', err);
       } finally {
@@ -39,8 +45,8 @@ export default function MedicationHistory() {
 
   const takenMedications = medications.filter(m => m.taken);
   const total = medications.length;
-  const takenCount = takenMedications.length;
-  const adherenceRate = total > 0 ? Math.round((takenCount / total) * 100) : 100;
+  const takenCount = Math.max(takenMedications.length, adherenceLogs.length);
+  const adherenceRate = total > 0 ? Math.min(100, Math.round((takenMedications.length / total) * 100)) : 100;
 
   if (loading) {
     return <LoadingSpinner text="Loading adherence history..." />;
@@ -105,41 +111,57 @@ export default function MedicationHistory() {
           </span>
         </div>
 
-        {takenMedications.length === 0 ? (
+        {adherenceLogs.length === 0 && takenMedications.length === 0 ? (
           <div className="text-center py-12">
             <div className="w-14 h-14 rounded-2xl bg-slate-100 text-slate-400 flex items-center justify-center mx-auto mb-3">
               <History className="w-7 h-7" />
             </div>
             <h3 className="text-base font-bold text-slate-800">No completed doses logged yet</h3>
             <p className="text-xs text-slate-500 mt-1 max-w-sm mx-auto">
-              When you mark your medications as taken from your daily schedule, they will appear here as confirmed logs.
+              When you mark your medications as taken from your reminders or schedule, they will appear here as confirmed logs.
             </p>
           </div>
         ) : (
           <div className="divide-y divide-slate-100">
-            {takenMedications.map((med) => (
-              <div key={med.id} className="py-4 first:pt-0 last:pb-0 flex items-center justify-between gap-4">
-                <div className="flex items-center gap-3.5">
-                  <div className="w-10 h-10 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center flex-shrink-0">
-                    <CheckCircle2 className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <h3 className="font-bold text-sm text-slate-900">{med.medicineName}</h3>
-                    <p className="text-xs text-slate-500 mt-0.5">
-                      Dosage: <span className="font-semibold text-slate-700">{med.dosage}</span>
-                    </p>
-                  </div>
-                </div>
+            {(adherenceLogs.length > 0 ? adherenceLogs : takenMedications).map((item) => {
+              const medName = item.medicine_name || item.medicineName;
+              const dosage = item.dosage;
+              const schedTime = item.scheduled_time || item.scheduleTime || 'Today';
+              const confirmedTime = item.confirmed_at
+                ? new Date(item.confirmed_at).toLocaleString('en-US', {
+                    month: 'short',
+                    day: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit'
+                  })
+                : 'Recorded today';
 
-                <div className="text-right">
-                  <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-emerald-50 text-emerald-700 rounded-full text-xs font-bold">
-                    <Clock className="w-3.5 h-3.5" />
-                    <span>{med.scheduleTime || 'Today'}</span>
+              return (
+                <div key={item.id} className="py-4 first:pt-0 last:pb-0 flex items-center justify-between gap-4">
+                  <div className="flex items-center gap-3.5">
+                    <div className="w-10 h-10 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center flex-shrink-0">
+                      <CheckCircle2 className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h3 className="font-bold text-sm text-slate-900">{medName}</h3>
+                      <p className="text-xs text-slate-500 mt-0.5">
+                        Dosage: <span className="font-semibold text-slate-700">{dosage || 'Prescribed dose'}</span>
+                      </p>
+                    </div>
                   </div>
-                  <span className="block text-[11px] text-slate-400 mt-1">Confirmed Taken</span>
+
+                  <div className="text-right">
+                    <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-emerald-50 text-emerald-700 rounded-full text-xs font-bold">
+                      <Check className="w-3.5 h-3.5" />
+                      <span>{confirmedTime}</span>
+                    </div>
+                    <span className="block text-[11px] text-slate-400 mt-1">
+                      Scheduled: {schedTime} • Confirmed Taken
+                    </span>
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
