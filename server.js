@@ -184,7 +184,7 @@ app.post('/send-email-otp', async (req, res) => {
         }
 
         const otp = Math.floor(100000 + Math.random() * 900000).toString();
-        
+
         emailOtps.set(email, {
             otp,
             expiresAt: Date.now() + 5 * 60 * 1000 // 5 minutes
@@ -213,7 +213,7 @@ app.post('/verify-email-otp', async (req, res) => {
         }
 
         const storedOtpData = emailOtps.get(email);
-        
+
         if (!storedOtpData) {
             return res.status(400).json({ success: false, message: 'Invalid verification code. Please try again.' });
         }
@@ -294,7 +294,7 @@ app.get('/api/users/check', async (req, res) => {
         if (!validFields.includes(field)) {
             return res.status(400).json({ error: 'Invalid field' });
         }
-        
+
         let data = null;
         if (supabase) {
             const { data: sbData, error } = await supabase
@@ -303,7 +303,7 @@ app.get('/api/users/check', async (req, res) => {
                 .eq(field, value)
                 .limit(1)
                 .single();
-                
+
             if (error && error.code !== 'PGRST116') {
                 throw error;
             }
@@ -323,7 +323,7 @@ app.get('/api/users/check', async (req, res) => {
 app.post('/api/users', async (req, res) => {
     try {
         const newUser = req.body;
-        
+
         if (supabase) {
             // Check for duplicates
             const { data: existingUser } = await supabase
@@ -331,7 +331,7 @@ app.post('/api/users', async (req, res) => {
                 .select('username, email, mobile')
                 .or(`username.eq.${newUser.username},email.eq.${newUser.email},mobile.eq.${newUser.mobile}`)
                 .limit(1);
-                
+
             if (existingUser && existingUser.length > 0) {
                 const eu = existingUser[0];
                 if (eu.username === newUser.username) return res.status(400).json({ error: 'Username already taken' });
@@ -354,9 +354,9 @@ app.post('/api/users', async (req, res) => {
 
         const db = readDB();
         const patients = db.patients || [];
-        const duplicate = patients.find(u => 
-            u.username === newUser.username || 
-            u.email === newUser.email || 
+        const duplicate = patients.find(u =>
+            u.username === newUser.username ||
+            u.email === newUser.email ||
             u.mobile === newUser.mobile
         );
         if (duplicate) {
@@ -418,7 +418,7 @@ app.post('/api/admin/login', async (req, res) => {
         }
 
         console.log('Admin login successful:', admin.username);
-        
+
         const token = crypto.randomBytes(32).toString('hex');
         adminTokens.add(token);
 
@@ -481,7 +481,7 @@ app.get('/api/admin/users', authenticateAdmin, async (req, res) => {
 app.post('/api/admin/users', authenticateAdmin, async (req, res) => {
     try {
         const newUser = req.body;
-        
+
         if (supabase) {
             // Check for duplicates
             const { data: existingUser } = await supabase
@@ -489,7 +489,7 @@ app.post('/api/admin/users', authenticateAdmin, async (req, res) => {
                 .select('username, email, mobile')
                 .or(`username.eq.${newUser.username},email.eq.${newUser.email},mobile.eq.${newUser.mobile}`)
                 .limit(1);
-                
+
             if (existingUser && existingUser.length > 0) {
                 const eu = existingUser[0];
                 if (eu.username === newUser.username) return res.status(400).json({ error: 'Username already taken' });
@@ -512,9 +512,9 @@ app.post('/api/admin/users', authenticateAdmin, async (req, res) => {
 
         const db = readDB();
         const patients = db.patients || [];
-        const duplicate = patients.find(u => 
-            u.username === newUser.username || 
-            u.email === newUser.email || 
+        const duplicate = patients.find(u =>
+            u.username === newUser.username ||
+            u.email === newUser.email ||
             u.mobile === newUser.mobile
         );
         if (duplicate) {
@@ -624,7 +624,7 @@ app.put('/api/medications/:id/taken', (req, res) => {
         if (med) {
             med.taken = true;
             med.taken_at = new Date().toISOString();
-            
+
             // Also log clinical adherence
             db.medication_adherence = db.medication_adherence || [];
             db.medication_adherence.unshift({
@@ -1382,7 +1382,7 @@ app.post('/api/admin/appointments', authenticateAdmin, async (req, res) => {
 
         const db = readDB();
         db.appointments = db.appointments || [];
-        const conflict = db.appointments.find(a => 
+        const conflict = db.appointments.find(a =>
             a.doctor_id === doctor_id &&
             a.appointment_date === appointment_date &&
             a.appointment_time === appointment_time &&
@@ -1448,7 +1448,7 @@ app.put('/api/admin/appointments/:id', authenticateAdmin, async (req, res) => {
 
         const db = readDB();
         db.appointments = db.appointments || [];
-        const conflict = db.appointments.find(a => 
+        const conflict = db.appointments.find(a =>
             a.doctor_id === doctor_id &&
             a.appointment_date === appointment_date &&
             a.appointment_time === appointment_time &&
